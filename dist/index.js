@@ -58,16 +58,18 @@ var nextId = 1; // Next identifier for each TaskMachine instance
 /**
  * Get model property keys for a given machine.
  */
-var machinePropKeys = function machinePropKeys(machine) {
+var defaultMachinePropKeys = function defaultMachinePropKeys(machine) {
   return {
-    running: 'machineRunning'
+    running: 'machineRunning',
+    startedAt: 'machineStartedAt',
+    stoppedAt: 'machineStoppedAt'
   };
 };
 
 /**
  * Get model property keys for a given taskKey.
  */
-var taskPropKeys = function taskPropKeys(machine, taskKey) {
+var defaultTaskPropKeys = function defaultTaskPropKeys(machine, taskKey) {
   return {
     error: taskKey + 'Error',
     executedAt: taskKey + 'ExecutedAt',
@@ -85,8 +87,8 @@ function configure(options) {
   if ((typeof options === 'undefined' ? 'undefined' : (0, _typeof3.default)(options)) !== 'object') return;
   if (typeof options.interval === 'number') defaultInterval = options.interval;
   if (typeof options.maxExecutions === 'number') defaultMaxExecutions = options.maxExecutions;
-  if (typeof options.machinePropKeys === 'function') machinePropKeys = options.machinePropKeys;
-  if (typeof options.taskPropKeys === 'function') taskPropKeys = options.taskPropKeys;
+  if (typeof options.machinePropKeys === 'function') defaultMachinePropKeys = options.machinePropKeys;
+  if (typeof options.taskPropKeys === 'function') defaultTaskPropKeys = options.taskPropKeys;
   if ((0, _typeof3.default)(options.logger) === 'object' || options.logger === false) {
     ['error', 'log', 'time', 'timeEnd', 'warn'].forEach(function (k) {
       logger[k] = options.logger && options.logger[k] || noLog;
@@ -103,7 +105,7 @@ var TaskContext = function () {
   function TaskContext(model, keys) {
     (0, _classCallCheck3.default)(this, TaskContext);
 
-    this.time = new Date().getTime();
+    this.time = Date.now();
     this.keys = keys;
     this.model = model;
   }
@@ -139,15 +141,18 @@ var TaskMachine = exports.TaskMachine = function () {
     this.id = nextId++;
     this.options = (0, _assign2.default)({
       interval: defaultInterval,
-      maxExecutions: defaultMaxExecutions
+      maxExecutions: defaultMaxExecutions,
+      machinePropKeys: defaultMachinePropKeys,
+      taskPropKeys: defaultTaskPropKeys
     }, options);
     this.interval = this.options.interval;
     this.maxExecutions = this.options.maxExecutions; // Approximate upper limit
     this.model = model;
-    this.propKeys = machinePropKeys(this);
+    this.propKeys = this.options.machinePropKeys(this);
     this.tasks = tasks;
 
     model[this.propKeys.running] = false;
+    model[this.propKeys.stoppedAt] = model[this.propKeys.startedAt] = NEVER_EXECUTED;
   }
 
   /**
@@ -169,7 +174,7 @@ var TaskMachine = exports.TaskMachine = function () {
       var model = this.model;
 
       (0, _keys2.default)(tasks).filter(predFn).forEach(function (taskKey) {
-        var keys = taskPropKeys(_this2, taskKey);
+        var keys = _this2.options.taskPropKeys(_this2, taskKey);
         var task = tasks[taskKey];
 
         logger.log('TaskMachine(' + _this2.id + ')#clear::taskKey', taskKey);
@@ -229,7 +234,7 @@ var TaskMachine = exports.TaskMachine = function () {
             case 8:
 
               (0, _keys2.default)(tasks).filter(function (taskKey) {
-                var keys = taskPropKeys(_this3, taskKey);
+                var keys = _this3.options.taskPropKeys(_this3, taskKey);
                 var task = tasks[taskKey];
 
                 if (model[keys.running]) return false; // Already running task?
@@ -237,7 +242,7 @@ var TaskMachine = exports.TaskMachine = function () {
                 // Evaluate guard condition
                 return typeof task.guard === 'function' ? !!task.guard(model) : true;
               }).map(function (taskKey) {
-                var keys = taskPropKeys(_this3, taskKey);
+                var keys = _this3.options.taskPropKeys(_this3, taskKey);
                 var task = tasks[taskKey];
 
                 count++;
@@ -337,7 +342,10 @@ var TaskMachine = exports.TaskMachine = function () {
       return this.model[this.propKeys.running];
     },
     set: function set(newIsRunning) {
-      if (this.model) this.model[this.propKeys.running] = newIsRunning;
+      if (this.model) {
+        this.model[this.propKeys.running] = newIsRunning;
+        this.model[newIsRunning ? this.propKeys.startedAt : this.propKeys.stoppedAt] = Date.now();
+      }
 
       if (newIsRunning) logger.time('TaskMachine(' + this.id + ').run');else logger.timeEnd('TaskMachine(' + this.id + ').run');
     }

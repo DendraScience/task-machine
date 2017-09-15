@@ -15,16 +15,18 @@ let nextId = 1 // Next identifier for each TaskMachine instance
 /**
  * Get model property keys for a given machine.
  */
-let machinePropKeys = (machine) => {
+let defaultMachinePropKeys = (machine) => {
   return {
-    running: 'machineRunning'
+    running: 'machineRunning',
+    startedAt: 'machineStartedAt',
+    stoppedAt: 'machineStoppedAt'
   }
 }
 
 /**
  * Get model property keys for a given taskKey.
  */
-let taskPropKeys = (machine, taskKey) => {
+let defaultTaskPropKeys = (machine, taskKey) => {
   return {
     error: `${taskKey}Error`,
     executedAt: `${taskKey}ExecutedAt`,
@@ -42,8 +44,8 @@ export function configure (options) {
   if (typeof options !== 'object') return
   if (typeof options.interval === 'number') defaultInterval = options.interval
   if (typeof options.maxExecutions === 'number') defaultMaxExecutions = options.maxExecutions
-  if (typeof options.machinePropKeys === 'function') machinePropKeys = options.machinePropKeys
-  if (typeof options.taskPropKeys === 'function') taskPropKeys = options.taskPropKeys
+  if (typeof options.machinePropKeys === 'function') defaultMachinePropKeys = options.machinePropKeys
+  if (typeof options.taskPropKeys === 'function') defaultTaskPropKeys = options.taskPropKeys
   if (typeof options.logger === 'object' || options.logger === false) {
     ['error', 'log', 'time', 'timeEnd', 'warn'].forEach(k => { logger[k] = (options.logger && options.logger[k]) || noLog })
   }
@@ -56,7 +58,7 @@ configure({
 
 class TaskContext {
   constructor (model, keys) {
-    this.time = (new Date()).getTime()
+    this.time = Date.now()
     this.keys = keys
     this.model = model
   }
@@ -84,15 +86,18 @@ export class TaskMachine {
     this.id = nextId++
     this.options = Object.assign({
       interval: defaultInterval,
-      maxExecutions: defaultMaxExecutions
+      maxExecutions: defaultMaxExecutions,
+      machinePropKeys: defaultMachinePropKeys,
+      taskPropKeys: defaultTaskPropKeys
     }, options)
     this.interval = this.options.interval
     this.maxExecutions = this.options.maxExecutions // Approximate upper limit
     this.model = model
-    this.propKeys = machinePropKeys(this)
+    this.propKeys = this.options.machinePropKeys(this)
     this.tasks = tasks
 
     model[this.propKeys.running] = false
+    model[this.propKeys.stoppedAt] = model[this.propKeys.startedAt] = NEVER_EXECUTED
   }
 
   /**
@@ -106,7 +111,7 @@ export class TaskMachine {
     const model = this.model
 
     Object.keys(tasks).filter(predFn).forEach(taskKey => {
-      const keys = taskPropKeys(this, taskKey)
+      const keys = this.options.taskPropKeys(this, taskKey)
       const task = tasks[taskKey]
 
       logger.log(`TaskMachine(${this.id})#clear::taskKey`, taskKey)
@@ -136,7 +141,10 @@ export class TaskMachine {
 
   get isRunning () { return this.model[this.propKeys.running] }
   set isRunning (newIsRunning) {
-    if (this.model) this.model[this.propKeys.running] = newIsRunning
+    if (this.model) {
+      this.model[this.propKeys.running] = newIsRunning
+      this.model[newIsRunning ? this.propKeys.startedAt : this.propKeys.stoppedAt] = Date.now()
+    }
 
     if (newIsRunning) logger.time(`TaskMachine(${this.id}).run`)
     else logger.timeEnd(`TaskMachine(${this.id}).run`)
@@ -162,7 +170,7 @@ export class TaskMachine {
       }, this.interval)
 
       Object.keys(tasks).filter(taskKey => {
-        const keys = taskPropKeys(this, taskKey)
+        const keys = this.options.taskPropKeys(this, taskKey)
         const task = tasks[taskKey]
 
         if (model[keys.running]) return false // Already running task?
@@ -170,7 +178,7 @@ export class TaskMachine {
         // Evaluate guard condition
         return typeof task.guard === 'function' ? !!task.guard(model) : true
       }).map(taskKey => {
-        const keys = taskPropKeys(this, taskKey)
+        const keys = this.options.taskPropKeys(this, taskKey)
         const task = tasks[taskKey]
 
         count++

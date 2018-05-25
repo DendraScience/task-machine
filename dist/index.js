@@ -3,44 +3,7 @@
 Object.defineProperty(exports, "__esModule", {
   value: true
 });
-exports.TaskMachine = exports.NEVER_EXECUTED = undefined;
-
-var _regenerator = require('babel-runtime/regenerator');
-
-var _regenerator2 = _interopRequireDefault(_regenerator);
-
-var _setImmediate2 = require('babel-runtime/core-js/set-immediate');
-
-var _setImmediate3 = _interopRequireDefault(_setImmediate2);
-
-var _keys = require('babel-runtime/core-js/object/keys');
-
-var _keys2 = _interopRequireDefault(_keys);
-
-var _assign = require('babel-runtime/core-js/object/assign');
-
-var _assign2 = _interopRequireDefault(_assign);
-
-var _promise = require('babel-runtime/core-js/promise');
-
-var _promise2 = _interopRequireDefault(_promise);
-
-var _classCallCheck2 = require('babel-runtime/helpers/classCallCheck');
-
-var _classCallCheck3 = _interopRequireDefault(_classCallCheck2);
-
-var _createClass2 = require('babel-runtime/helpers/createClass');
-
-var _createClass3 = _interopRequireDefault(_createClass2);
-
-var _typeof2 = require('babel-runtime/helpers/typeof');
-
-var _typeof3 = _interopRequireDefault(_typeof2);
-
 exports.configure = configure;
-
-function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
-
 /**
  * Utility class to execute async tasks against model state.
  *
@@ -49,16 +12,16 @@ function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { de
  * @module task-machine
  */
 
-var NEVER_EXECUTED = exports.NEVER_EXECUTED = 8640000000000000;
+const NEVER_EXECUTED = exports.NEVER_EXECUTED = 8640000000000000;
 
-var defaultInterval = 500;
-var defaultMaxExecutions = 200;
-var nextId = 1; // Next identifier for each TaskMachine instance
+let defaultInterval = 500;
+let defaultMaxExecutions = 200;
+let nextId = 1; // Next identifier for each TaskMachine instance
 
 /**
  * Get model property keys for a given machine.
  */
-var defaultMachinePropKeys = function defaultMachinePropKeys(machine) {
+let defaultMachinePropKeys = machine => {
   return {
     running: 'machineRunning',
     startedAt: 'machineStartedAt',
@@ -69,28 +32,28 @@ var defaultMachinePropKeys = function defaultMachinePropKeys(machine) {
 /**
  * Get model property keys for a given taskKey.
  */
-var defaultTaskPropKeys = function defaultTaskPropKeys(machine, taskKey) {
+let defaultTaskPropKeys = (machine, taskKey) => {
   return {
-    error: taskKey + 'Error',
-    executedAt: taskKey + 'ExecutedAt',
-    running: taskKey + 'Running',
-    ready: taskKey + 'Ready'
+    error: `${taskKey}Error`,
+    executedAt: `${taskKey}ExecutedAt`,
+    running: `${taskKey}Running`,
+    ready: `${taskKey}Ready`
   };
 };
 
 // Local logger that can be redirected
-var logger = {};
+const logger = {};
 
 function noLog() {}
 
 function configure(options) {
-  if ((typeof options === 'undefined' ? 'undefined' : (0, _typeof3.default)(options)) !== 'object') return;
+  if (typeof options !== 'object') return;
   if (typeof options.interval === 'number') defaultInterval = options.interval;
   if (typeof options.maxExecutions === 'number') defaultMaxExecutions = options.maxExecutions;
   if (typeof options.machinePropKeys === 'function') defaultMachinePropKeys = options.machinePropKeys;
   if (typeof options.taskPropKeys === 'function') defaultTaskPropKeys = options.taskPropKeys;
-  if ((0, _typeof3.default)(options.logger) === 'object' || options.logger === false) {
-    ['error', 'log', 'time', 'timeEnd', 'warn'].forEach(function (k) {
+  if (typeof options.logger === 'object' || options.logger === false) {
+    ['error', 'info', 'warn'].forEach(k => {
       logger[k] = options.logger && options.logger[k] || noLog;
     });
   }
@@ -101,55 +64,138 @@ configure({
   logger: false
 });
 
-var TaskContext = function () {
-  function TaskContext(model, keys) {
-    (0, _classCallCheck3.default)(this, TaskContext);
-
-    this.time = Date.now();
-    this.keys = keys;
-    this.model = model;
+class Task {
+  constructor(props) {
+    Object.assign(this, props);
   }
 
-  (0, _createClass3.default)(TaskContext, [{
-    key: 'execute',
-    value: function execute(task) {
-      var _this = this;
+  get isRunning() {
+    return this.model[this.propKeys.running];
+  }
 
-      this.model[this.keys.executedAt] = this.time;
+  set isRunning(newIsRunning) {
+    const { model, propKeys } = this;
 
-      return _promise2.default.resolve(task.execute(this.model)).then(function (res) {
-        if (_this.model[_this.keys.executedAt] === _this.time) {
-          return {
-            preempted: false,
-            result: res
-          };
-        }
-
-        return {
-          preempted: true
-        };
-      });
+    if (model) {
+      model[propKeys.running] = newIsRunning;
     }
-  }]);
-  return TaskContext;
-}();
+  }
 
-var TaskMachine = exports.TaskMachine = function () {
-  function TaskMachine(model, tasks, options) {
-    (0, _classCallCheck3.default)(this, TaskMachine);
+  get isRunnable() {
+    const { model, hooks } = this;
 
+    if (this.isRunning) return false; // Already running task?
+
+    // Evaluate guard condition
+    return typeof hooks.guard === 'function' ? !!hooks.guard(model) : true;
+  }
+
+  /**
+   * Clear model state for this task.
+   */
+  clear() {
+    const { id, key, model, hooks, propKeys } = this;
+
+    logger.info('Task #clear', { id, key });
+
+    this.isRunning = false;
+
+    model[propKeys.error] = null;
+    model[propKeys.ready] = false;
+    model[propKeys.executedAt] = NEVER_EXECUTED;
+
+    // Invoke clear hook
+    if (typeof hooks.clear === 'function') hooks.clear(model);
+  }
+
+  /**
+   * Cancel processing immediately and clean up.
+   */
+  destroy() {
+    this.destroyed = true;
+    this.model = null;
+    this.hooks = null;
+    this.propKeys = null;
+  }
+
+  /**
+   * Begin processing this task.
+   */
+  async start() {
+    const { id, key, model, hooks, options, propKeys } = this;
+    const { helpers } = options;
+
+    logger.info('Task #start', { id, key });
+
+    this.isRunning = true;
+
+    model[propKeys.error] = null;
+    model[propKeys.ready] = false;
+
+    try {
+      if (typeof hooks.beforeExecute === 'function') hooks.beforeExecute(model, helpers);
+      if (typeof hooks.execute !== 'function') throw Error('Execute not a function');
+
+      const time = model[propKeys.executedAt] = Date.now();
+
+      logger.info('Task #start, execute', { id, key });
+
+      let res = await hooks.execute(model, helpers);
+
+      // Abort if destroyed or preempted
+      if (this.destroyed || !(model[propKeys.executedAt] === time)) return;
+
+      // Process results
+      if (typeof hooks.afterExecute === 'function') res = hooks.afterExecute(model, res, helpers);
+      if (!res) throw Error('Result not truthy');
+
+      // Assign targets in model
+      if (typeof hooks.assign === 'function') hooks.assign(model, res, helpers);
+
+      model[propKeys.ready] = true;
+
+      logger.info('Task #start, ready', { id, key });
+
+      this.isRunning = false;
+    } catch (err) {
+      // Abort if destroyed
+      if (this.destroyed) return;
+
+      logger.error('Task #start, error', { err, id, key });
+
+      model[propKeys.error] = this.options.errorAsObject ? err : err.message;
+
+      this.isRunning = false;
+    }
+  }
+}
+
+exports.Task = Task;
+class TaskMachine {
+  constructor(model, tasks, options) {
     this.id = nextId++;
-    this.options = (0, _assign2.default)({
+
+    const opts = this.options = Object.assign({
+      errorAsObject: false,
       interval: defaultInterval,
-      maxExecutions: defaultMaxExecutions,
       machinePropKeys: defaultMachinePropKeys,
-      taskPropKeys: defaultTaskPropKeys
+      maxExecutions: defaultMaxExecutions,
+      taskPropKeys: defaultTaskPropKeys,
+      waitForCompletion: false
     }, options);
-    this.interval = this.options.interval;
-    this.maxExecutions = this.options.maxExecutions; // Approximate upper limit
+
+    this.interval = opts.interval;
+    this.maxExecutions = opts.maxExecutions; // Approximate upper limit
     this.model = model;
-    this.propKeys = this.options.machinePropKeys(this);
-    this.tasks = tasks;
+    this.propKeys = opts.machinePropKeys(this);
+    this.tasks = Object.keys(tasks).map(key => new Task({
+      hooks: tasks[key],
+      id: this.id,
+      key,
+      model,
+      options: opts,
+      propKeys: opts.taskPropKeys(this, key)
+    }));
 
     model[this.propKeys.running] = false;
     model[this.propKeys.stoppedAt] = model[this.propKeys.startedAt] = NEVER_EXECUTED;
@@ -158,197 +204,99 @@ var TaskMachine = exports.TaskMachine = function () {
   /**
    * Clear state for all tasks where the specified predicate is true.
    */
+  clear(pred = true) {
+    const { id } = this;
 
+    logger.info('TaskMachine #clear', { id });
 
-  (0, _createClass3.default)(TaskMachine, [{
-    key: 'clear',
-    value: function clear() {
-      var _this2 = this;
+    const predFn = typeof pred === 'function' ? pred : function (task) {
+      return pred === true || task.key === pred;
+    };
 
-      var pred = arguments.length > 0 && arguments[0] !== undefined ? arguments[0] : true;
+    this.tasks.filter(predFn).forEach(task => task.clear());
 
-      var predFn = typeof pred === 'function' ? pred : function (taskKey) {
-        return pred === true || taskKey === pred;
-      };
-      var tasks = this.tasks;
-      var model = this.model;
+    return this;
+  }
 
-      (0, _keys2.default)(tasks).filter(predFn).forEach(function (taskKey) {
-        var keys = _this2.options.taskPropKeys(_this2, taskKey);
-        var task = tasks[taskKey];
+  /**
+   * Cancel processing immediately and clean up.
+   */
+  destroy() {
+    const { id } = this;
 
-        logger.log('TaskMachine(' + _this2.id + ')#clear::taskKey', taskKey);
+    logger.info('TaskMachine #destroy', { id });
 
-        model[keys.error] = null;
-        model[keys.running] = false;
-        model[keys.ready] = false;
-        model[keys.executedAt] = NEVER_EXECUTED;
+    this.destroyed = true;
+    this.tasks.forEach(task => task.destroy());
+    this.tasks = null;
+    this.model = null;
+    this.options = null;
+  }
 
-        // Invoke clear hook
-        if (typeof task.clear === 'function') task.clear(model);
+  get isRunning() {
+    return this.model[this.propKeys.running];
+  }
+
+  set isRunning(newIsRunning) {
+    const { id, model, propKeys } = this;
+
+    if (model) {
+      model[propKeys.running] = newIsRunning;
+      model[newIsRunning ? propKeys.startedAt : propKeys.stoppedAt] = Date.now();
+    }
+
+    logger.info('TaskMachine #isRunning(set)', { id, newIsRunning });
+  }
+
+  /**
+   * Begin processing all tasks.
+   */
+  async start() {
+    const { id, options, tasks } = this;
+
+    logger.info('TaskMachine #start', { id });
+
+    if (this.isRunning || this.destroyed) return false;
+
+    this.isRunning = true;
+
+    let count = 0;
+    let total = 0;
+
+    do {
+      const runnableTasks = tasks.filter(task => task.isRunnable);
+
+      logger.info('TaskMachine #start, runnable tasks', {
+        id,
+        keys: runnableTasks.map(task => task.key)
       });
 
-      return this;
-    }
+      if (runnableTasks.length === 0 && count === 0) break;
 
-    /**
-     * Cancel processing immediately and clean up.
-     */
+      if (total > this.maxExecutions) {
+        logger.warn('TaskMachine #start, max executions exceeded', {
+          id,
+          total,
+          maxExecutions: this.maxExecutions });
 
-  }, {
-    key: 'destroy',
-    value: function destroy() {
-      logger.log('TaskMachine(' + this.id + ')#destroy');
-
-      this.destroyed = true;
-      this.tasks = null;
-      this.model = null;
-    }
-  }, {
-    key: '_workerGen',
-    value: /*#__PURE__*/_regenerator2.default.mark(function _workerGen(done) {
-      var _this3 = this;
-
-      var tasks, model, count, total;
-      return _regenerator2.default.wrap(function _workerGen$(_context) {
-        while (1) {
-          switch (_context.prev = _context.next) {
-            case 0:
-              this.isRunning = true;
-
-              logger.log('TaskMachine(' + this.id + ')#worker');
-
-              tasks = this.tasks;
-              model = this.model;
-              count = 0;
-              total = 0;
-
-            case 6:
-              _context.next = 8;
-              return this.interval < 0 ? (0, _setImmediate3.default)(function () {
-                _this3._worker.next();
-              }) : setTimeout(function () {
-                _this3._worker.next();
-              }, this.interval);
-
-            case 8:
-
-              (0, _keys2.default)(tasks).filter(function (taskKey) {
-                var keys = _this3.options.taskPropKeys(_this3, taskKey);
-                var task = tasks[taskKey];
-
-                if (model[keys.running]) return false; // Already running task?
-
-                // Evaluate guard condition
-                return typeof task.guard === 'function' ? !!task.guard(model) : true;
-              }).map(function (taskKey) {
-                var keys = _this3.options.taskPropKeys(_this3, taskKey);
-                var task = tasks[taskKey];
-
-                count++;
-                total++;
-
-                logger.log('TaskMachine(' + _this3.id + ')#worker:beforeExecute::taskKey,count,total', taskKey, count, total);
-
-                model[keys.error] = null;
-                model[keys.running] = true;
-                model[keys.ready] = false;
-
-                // Optional beforeExecute hook
-                if (typeof task.beforeExecute === 'function') task.beforeExecute(model);
-
-                return new TaskContext(model, keys).execute(task).then(function (state) {
-                  logger.log('TaskMachine(' + _this3.id + ')#worker:afterExecute::taskKey,state', taskKey, state);
-
-                  model[keys.running] = false;
-
-                  if (_this3.destroyed || !state || state.preempted) return;
-
-                  // Process results
-                  var res = state.result;
-                  if (typeof task.afterExecute === 'function') res = task.afterExecute(model, res);
-                  if (!res) throw Error('Not found: ' + taskKey);
-
-                  // Assign targets
-                  if (typeof task.assign === 'function') task.assign(model, res);
-
-                  model[keys.ready] = true;
-                }).catch(function (err) {
-                  logger.error('TaskMachine(' + _this3.id + ')#worker:catch::taskKey,err', taskKey, err);
-
-                  if (_this3.destroyed) return;
-
-                  model[keys.running] = false;
-                  model[keys.error] = err.message;
-                }).then(function () {
-                  count--;
-                });
-              });
-
-              // Safety net
-
-              if (!(total > this.maxExecutions)) {
-                _context.next = 12;
-                break;
-              }
-
-              logger.warn('TaskMachine(' + this.id + ')#worker:break::total,maxExecutions', total, this.maxExecutions);
-              return _context.abrupt('break', 13);
-
-            case 12:
-              if (count > 0 && !this.destroyed) {
-                _context.next = 6;
-                break;
-              }
-
-            case 13:
-
-              logger.log('TaskMachine(' + this.id + ')#worker:done::total', total);
-
-              this.isRunning = false;
-              done(true);
-
-            case 16:
-            case 'end':
-              return _context.stop();
-          }
-        }
-      }, _workerGen, this);
-    })
-
-    /**
-     * Begin processing all tasks. Uses a generator to manage the tasks.
-     */
-
-  }, {
-    key: 'start',
-    value: function start() {
-      var _this4 = this;
-
-      logger.log('TaskMachine(' + this.id + ')#start');
-
-      return new _promise2.default(function (resolve) {
-        if (_this4.isRunning || _this4.destroyed) {
-          resolve(false);
-        } else {
-          _this4._worker = _this4._workerGen(resolve);
-          _this4._worker.next();
-        }
-      });
-    }
-  }, {
-    key: 'isRunning',
-    get: function get() {
-      return this.model[this.propKeys.running];
-    },
-    set: function set(newIsRunning) {
-      if (this.model) {
-        this.model[this.propKeys.running] = newIsRunning;
-        this.model[newIsRunning ? this.propKeys.startedAt : this.propKeys.stoppedAt] = Date.now();
+        break;
       }
 
-      if (newIsRunning) logger.time('TaskMachine(' + this.id + ').run');else logger.timeEnd('TaskMachine(' + this.id + ').run');
-    }
-  }]);
-  return TaskMachine;
-}();
+      const pendingTasks = runnableTasks.map(task => {
+        count++;
+        total++;
+
+        return task.start().then(() => count--, () => count--);
+      });
+
+      if (options.waitForCompletion) await Promise.all(pendingTasks);
+
+      await new Promise(resolve => this.interval < 0 ? setImmediate(resolve) : setTimeout(resolve, this.interval));
+    } while (!this.destroyed);
+
+    this.isRunning = false;
+
+    return true;
+  }
+}
+exports.TaskMachine = TaskMachine;

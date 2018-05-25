@@ -8,7 +8,7 @@ describe('Module', function () {
   // Simple logging to an array
   const logEntries = []
   const logger = {
-    log: (...args) => {
+    info: (...args) => {
       logEntries.push([...args].join(' '))
     }
   }
@@ -36,7 +36,7 @@ describe('Module', function () {
           return new Promise((resolve, reject) => {
             setTimeout(() => {
               resolve({some: 'data'})
-            }, 200)
+            }, 400)
           })
         },
         afterExecute (m, res) {
@@ -51,7 +51,7 @@ describe('Module', function () {
 
     tm.configure({
       interval: 200,
-      logger: logger
+      logger
     })
 
     const machine = new tm.TaskMachine(model, tasks)
@@ -71,7 +71,7 @@ describe('Module', function () {
       expect(afterExecuteRes).to.deep.equal({
         some: 'data'
       })
-      expect(logEntries).to.have.lengthOf(6)
+      expect(logEntries).to.have.lengthOf(11)
     })
   })
 })

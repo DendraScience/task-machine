@@ -2,6 +2,7 @@
 module.exports = {
   root: true,
   env: {
+    mocha: true,
     node: true
   },
   extends: ['standard', 'prettier', 'prettier/standard'],
@@ -11,5 +12,9 @@ module.exports = {
   },
   rules: {
     'prettier/prettier': 'error'
+  },
+  globals: {
+    assert: true,
+    expect: true
   }
 }

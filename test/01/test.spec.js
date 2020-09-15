@@ -26,24 +26,24 @@ describe('Module', function () {
     const model = {}
     const tasks = {
       a: {
-        clear (m) {
+        clear(m) {
           m.value = null
         },
-        guard (m) {
+        guard(m) {
           return !m.value
         },
-        execute (m) {
+        execute(m) {
           return new Promise((resolve, reject) => {
             setTimeout(() => {
-              resolve({some: 'data'})
+              resolve({ some: 'data' })
             }, 400)
           })
         },
-        afterExecute (m, res) {
+        afterExecute(m, res) {
           afterExecuteRes = res
           return res
         },
-        assign (m, res) {
+        assign(m, res) {
           m.value = res
         }
       }
@@ -58,20 +58,23 @@ describe('Module', function () {
 
     expect(machine).to.have.property('interval', 200)
 
-    return machine.clear().start().then(() => {
-      expect(model).to.deep.include({
-        aError: null,
-        aRunning: false,
-        aReady: true,
-        machineRunning: false,
-        value: {
+    return machine
+      .clear()
+      .start()
+      .then(() => {
+        expect(model).to.deep.include({
+          aError: null,
+          aRunning: false,
+          aReady: true,
+          machineRunning: false,
+          value: {
+            some: 'data'
+          }
+        })
+        expect(afterExecuteRes).to.deep.equal({
           some: 'data'
-        }
+        })
+        expect(logEntries).to.have.lengthOf(11)
       })
-      expect(afterExecuteRes).to.deep.equal({
-        some: 'data'
-      })
-      expect(logEntries).to.have.lengthOf(11)
-    })
   })
 })

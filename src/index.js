@@ -15,7 +15,7 @@ let nextId = 1 // Next identifier for each TaskMachine instance
 /**
  * Get model property keys for a given machine.
  */
-let defaultMachinePropKeys = (machine) => {
+let defaultMachinePropKeys = machine => {
   return {
     running: 'machineRunning',
     startedAt: 'machineStartedAt',
@@ -38,16 +38,21 @@ let defaultTaskPropKeys = (machine, taskKey) => {
 // Local logger that can be redirected
 const logger = {}
 
-function noLog () {}
+function noLog() {}
 
-export function configure (options) {
+export function configure(options) {
   if (typeof options !== 'object') return
   if (typeof options.interval === 'number') defaultInterval = options.interval
-  if (typeof options.maxExecutions === 'number') defaultMaxExecutions = options.maxExecutions
-  if (typeof options.machinePropKeys === 'function') defaultMachinePropKeys = options.machinePropKeys
-  if (typeof options.taskPropKeys === 'function') defaultTaskPropKeys = options.taskPropKeys
+  if (typeof options.maxExecutions === 'number')
+    defaultMaxExecutions = options.maxExecutions
+  if (typeof options.machinePropKeys === 'function')
+    defaultMachinePropKeys = options.machinePropKeys
+  if (typeof options.taskPropKeys === 'function')
+    defaultTaskPropKeys = options.taskPropKeys
   if (typeof options.logger === 'object' || options.logger === false) {
-    ['error', 'info', 'warn'].forEach(k => { logger[k] = (options.logger && options.logger[k]) || noLog })
+    ;['error', 'info', 'warn'].forEach(k => {
+      logger[k] = (options.logger && options.logger[k]) || noLog
+    })
   }
 }
 
@@ -57,22 +62,24 @@ configure({
 })
 
 export class Task {
-  constructor (props) {
+  constructor(props) {
     Object.assign(this, props)
   }
 
-  get isRunning () { return this.model[this.propKeys.running] }
+  get isRunning() {
+    return this.model[this.propKeys.running]
+  }
 
-  set isRunning (newIsRunning) {
-    const {model, propKeys} = this
+  set isRunning(newIsRunning) {
+    const { model, propKeys } = this
 
     if (model) {
       model[propKeys.running] = newIsRunning
     }
   }
 
-  get isRunnable () {
-    const {model, hooks} = this
+  get isRunnable() {
+    const { model, hooks } = this
 
     if (this.isRunning) return false // Already running task?
 
@@ -83,10 +90,10 @@ export class Task {
   /**
    * Clear model state for this task.
    */
-  clear () {
-    const {id, key, model, hooks, propKeys} = this
+  clear() {
+    const { id, key, model, hooks, propKeys } = this
 
-    logger.info('Task #clear', {id, key})
+    logger.info('Task #clear', { id, key })
 
     this.isRunning = false
 
@@ -101,7 +108,7 @@ export class Task {
   /**
    * Cancel processing immediately and clean up.
    */
-  destroy () {
+  destroy() {
     this.destroyed = true
     this.model = null
     this.hooks = null
@@ -111,11 +118,11 @@ export class Task {
   /**
    * Begin processing this task.
    */
-  async start () {
-    const {id, key, model, hooks, options, propKeys} = this
-    const {helpers} = options
+  async start() {
+    const { id, key, model, hooks, options, propKeys } = this
+    const { helpers } = options
 
-    logger.info('Task #start', {id, key})
+    logger.info('Task #start', { id, key })
 
     this.isRunning = true
 
@@ -123,12 +130,14 @@ export class Task {
     model[propKeys.ready] = false
 
     try {
-      if (typeof hooks.beforeExecute === 'function') hooks.beforeExecute(model, helpers)
-      if (typeof hooks.execute !== 'function') throw Error('Execute not a function')
+      if (typeof hooks.beforeExecute === 'function')
+        hooks.beforeExecute(model, helpers)
+      if (typeof hooks.execute !== 'function')
+        throw Error('Execute not a function')
 
-      const time = model[propKeys.executedAt] = Date.now()
+      const time = (model[propKeys.executedAt] = Date.now())
 
-      logger.info('Task #start, execute', {id, key})
+      logger.info('Task #start, execute', { id, key })
 
       let res = await hooks.execute(model, helpers)
 
@@ -136,7 +145,8 @@ export class Task {
       if (this.destroyed || !(model[propKeys.executedAt] === time)) return
 
       // Process results
-      if (typeof hooks.afterExecute === 'function') res = hooks.afterExecute(model, res, helpers)
+      if (typeof hooks.afterExecute === 'function')
+        res = hooks.afterExecute(model, res, helpers)
       if (!res) throw Error('Result not truthy')
 
       // Assign targets in model
@@ -144,14 +154,14 @@ export class Task {
 
       model[propKeys.ready] = true
 
-      logger.info('Task #start, ready', {id, key})
+      logger.info('Task #start, ready', { id, key })
 
       this.isRunning = false
     } catch (err) {
       // Abort if destroyed
       if (this.destroyed) return
 
-      logger.error('Task #start, error', {err, id, key})
+      logger.error('Task #start, error', { err, id, key })
 
       model[propKeys.error] = this.options.errorAsObject ? err : err.message
 
@@ -161,46 +171,57 @@ export class Task {
 }
 
 export class TaskMachine {
-  constructor (model, tasks, options) {
+  constructor(model, tasks, options) {
     this.id = nextId++
 
-    const opts = this.options = Object.assign({
-      errorAsObject: false,
-      interval: defaultInterval,
-      machinePropKeys: defaultMachinePropKeys,
-      maxExecutions: defaultMaxExecutions,
-      taskPropKeys: defaultTaskPropKeys,
-      waitForCompletion: false
-    }, options)
+    const opts = (this.options = Object.assign(
+      {
+        errorAsObject: false,
+        interval: defaultInterval,
+        machinePropKeys: defaultMachinePropKeys,
+        maxExecutions: defaultMaxExecutions,
+        taskPropKeys: defaultTaskPropKeys,
+        waitForCompletion: false
+      },
+      options
+    ))
 
     this.interval = opts.interval
     this.maxExecutions = opts.maxExecutions // Approximate upper limit
     this.model = model
     this.propKeys = opts.machinePropKeys(this)
-    this.tasks = Object.keys(tasks).map(key => new Task({
-      hooks: tasks[key],
-      id: this.id,
-      key,
-      model,
-      options: opts,
-      propKeys: opts.taskPropKeys(this, key)
-    }))
+    this.tasks = Object.keys(tasks).map(
+      key =>
+        new Task({
+          hooks: tasks[key],
+          id: this.id,
+          key,
+          model,
+          options: opts,
+          propKeys: opts.taskPropKeys(this, key)
+        })
+    )
 
     model[this.propKeys.running] = false
-    model[this.propKeys.stoppedAt] = model[this.propKeys.startedAt] = NEVER_EXECUTED
+    model[this.propKeys.stoppedAt] = model[
+      this.propKeys.startedAt
+    ] = NEVER_EXECUTED
   }
 
   /**
    * Clear state for all tasks where the specified predicate is true.
    */
-  clear (pred = true) {
-    const {id} = this
+  clear(pred = true) {
+    const { id } = this
 
-    logger.info('TaskMachine #clear', {id})
+    logger.info('TaskMachine #clear', { id })
 
-    const predFn = typeof pred === 'function' ? pred : function (task) {
-      return (pred === true) || (task.key === pred)
-    }
+    const predFn =
+      typeof pred === 'function'
+        ? pred
+        : function (task) {
+            return pred === true || task.key === pred
+          }
 
     this.tasks.filter(predFn).forEach(task => task.clear())
 
@@ -210,10 +231,10 @@ export class TaskMachine {
   /**
    * Cancel processing immediately and clean up.
    */
-  destroy () {
-    const {id} = this
+  destroy() {
+    const { id } = this
 
-    logger.info('TaskMachine #destroy', {id})
+    logger.info('TaskMachine #destroy', { id })
 
     this.destroyed = true
     this.tasks.forEach(task => task.destroy())
@@ -222,26 +243,28 @@ export class TaskMachine {
     this.options = null
   }
 
-  get isRunning () { return this.model[this.propKeys.running] }
+  get isRunning() {
+    return this.model[this.propKeys.running]
+  }
 
-  set isRunning (newIsRunning) {
-    const {id, model, propKeys} = this
+  set isRunning(newIsRunning) {
+    const { id, model, propKeys } = this
 
     if (model) {
       model[propKeys.running] = newIsRunning
       model[newIsRunning ? propKeys.startedAt : propKeys.stoppedAt] = Date.now()
     }
 
-    logger.info('TaskMachine #isRunning(set)', {id, newIsRunning})
+    logger.info('TaskMachine #isRunning(set)', { id, newIsRunning })
   }
 
   /**
    * Begin processing all tasks.
    */
-  async start () {
-    const {id, options, tasks} = this
+  async start() {
+    const { id, options, tasks } = this
 
-    logger.info('TaskMachine #start', {id})
+    logger.info('TaskMachine #start', { id })
 
     if (this.isRunning || this.destroyed) return false
 
@@ -258,13 +281,14 @@ export class TaskMachine {
         keys: runnableTasks.map(task => task.key)
       })
 
-      if ((runnableTasks.length === 0) && (count === 0)) break
+      if (runnableTasks.length === 0 && count === 0) break
 
       if (total > this.maxExecutions) {
         logger.warn('TaskMachine #start, max executions exceeded', {
           id,
           total,
-          maxExecutions: this.maxExecutions})
+          maxExecutions: this.maxExecutions
+        })
 
         break
       }
@@ -273,12 +297,19 @@ export class TaskMachine {
         count++
         total++
 
-        return task.start().then(() => (count--), () => (count--))
+        return task.start().then(
+          () => count--,
+          () => count--
+        )
       })
 
       if (options.waitForCompletion) await Promise.all(pendingTasks)
 
-      await new Promise(resolve => this.interval < 0 ? setImmediate(resolve) : setTimeout(resolve, this.interval))
+      await new Promise(resolve =>
+        this.interval < 0
+          ? setImmediate(resolve)
+          : setTimeout(resolve, this.interval)
+      )
     } while (!this.destroyed)
 
     this.isRunning = false
